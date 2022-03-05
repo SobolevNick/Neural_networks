@@ -2,6 +2,7 @@
 #include <cmath>
 #include <vector>
 #include <stdlib.h>
+#include <Eigen/Dense>
 class sigma { //класс реализует две функции: сигмоиду и производную сигмоиды
 public:
     float evaluate0(float x) { //сигмоида
