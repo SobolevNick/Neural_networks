@@ -25,7 +25,6 @@ namespace ML {
     public:
         using Matrix = Eigen::MatrixXf;
         using Vector = Eigen::VectorXf;
-        using RowVector = Eigen::RowVectorXf;
         NetLayer(int m, int n)
             : A_(Matrix::Random(m, n)), b_(Vector::Random(m)) {
         }
@@ -44,8 +43,8 @@ namespace ML {
         Vector count_grad_b(Vector x, Vector u) const {
             return sigma::evaluate1(A_ * x + b_) * u;
         }
-        RowVector count_grad_x(Vector x, Vector u) const {
-            return u.transpose() * sigma::evaluate1(A_ * x + b_) * A_;
+        Vector count_grad_x(Vector x, Vector u) const {
+            return (u.transpose() * sigma::evaluate1(A_ * x + b_) * A_).transpose();
         }
 
     private:
