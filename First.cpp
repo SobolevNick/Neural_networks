@@ -1,5 +1,4 @@
 #include <Eigen/Core>
-#include <Eigen/Dense>
 #include <EigenRand/EigenRand>
 #include <cmath>
 #include <iostream>
@@ -24,15 +23,33 @@ namespace ML {
         };
     };
 
+    class Random {
+        using Matrix = Eigen::MatrixXf;
+        using Vector = Eigen::VectorXf;
+
+    public:
+        Random() = default;
+        Eigen::Rand::Vmt19937_64 urng{42};
+        Random(unsigned long long seed) : rung{seed} {}
+        Matrix makeMatrix(int rows, int columns) {
+            return norm_gen.template generate<Matrix>(rows, columns, urng);
+        }
+        Vector makeVector(int rows) {
+            return norm_gen.template generate<Matrix>(rows, 1, urng);
+        }
+
+    private:
+        Eigen::Rand::Vmt19937_64 rung{42};
+        Eigen::Rand::NormalGen<float> norm_gen{0, 10};
+    };
+
     class NetLayer {
     public:
         using Matrix = Eigen::MatrixXf;
         using Vector = Eigen::VectorXf;
-        Eigen::Rand::Vmt19937_64 urng{42};
-        Eigen::Rand::NormalGen<float> norm_gen{0, 10};
-        NetLayer(int m, int n)
-            : A_(norm_gen.template generate<Matrix>(m, n, urng)), b_(norm_gen.template generate<Matrix>(m, 1, urng)) {
-        }
+        NetLayer(int rows, int columns)
+            : A_(Generator_.makeMatrix(rows, columns)),
+              b_(Generator_.makeVector(rows)) {}
         void print_weights() const {
             std::cout << A_ << std::endl;
         }
@@ -53,6 +70,7 @@ namespace ML {
         }
 
     private:
+        static Random Generator_;
         Matrix A_;
         Vector b_;
     };
@@ -60,29 +78,32 @@ namespace ML {
     class LossFunction {
     public:
         using Vector = Eigen::VectorXf;
-        static float count_loss_function(std::vector<std::pair<Eigen::VectorXf, Eigen::VectorXf>> x) {
-            NetLayer Layer(x[0].first.size(), x[0].second.size());
+        struct TrainingDatum {
+            Vector Input;
+            Vector Output;
+        };
+        using TrainingData = std::vector<TrainingDatum>;
+        static float count_loss_function(const TrainingData &data, const std::vector<Vector> &z) {
             float sum = 0;
-            for (int i = 0; i < x.size(); i++) {
-                sum = (Layer.predict(x[i].first) - x[i].second).dot(Layer.predict(x[i].first) - x[i].second) + sum;
+            for (int i = 0; i < z.size(); ++i) {
+                sum = (z[i] - data[i].Output).dot(z[i] - data[i].Output) + sum;
             }
-            return sum / x.size();
+            return sum / z.size();
         }
-        static Vector count_starting_gradient(std::vector<std::pair<Eigen::VectorXf, Eigen::VectorXf>> x) {
-            NetLayer Layer(x[0].first.size(), x[0].second.size());
-            Vector sum(x[0].second.size());
-            sum = Vector::Zero(x[0].second.size());
-            for (int i = 0; i < x.size(); i++) {
-                sum = Layer.predict(x[i].first) - x[i].second + sum;
+        static Vector count_starting_gradient(const TrainingData &data, const std::vector<Vector> &z) {
+            Vector sum(z.size());
+            sum = Vector::Zero(z.size());
+            for (int i = 0; i < z.size(); i++) {
+                sum = z[i] - data[i].Output + sum;
             }
-            return 2 * sum / x.size();
+            return 2 * sum / z.size();
         }
     };
 
     class NeuralNetwork {
         using Matrix = Eigen::MatrixXf;
         using Vector = Eigen::VectorXf;
-        NeuralNetwork(Vector x, Vector y) {
+        NeuralNetwork(const Vector x, const Vector y) {
             NetLayer Layer((y.rows()), (x.rows()));
         }
         static std::pair<Matrix, Vector> count_theta_2(Matrix A, Vector b) {
@@ -149,4 +170,5 @@ void test_all() {
 
 int main() {
     test_all();
+    return 0;
 }
