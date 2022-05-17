@@ -1,4 +1,4 @@
-#include <Eigen/Core>
+#include <Eigen/Dense>
 #include <EigenRand/EigenRand>
 #include <cmath>
 #include <iostream>
@@ -67,22 +67,22 @@ namespace ML {
             b_ -= b;
         }
         Vector predict(const Vector &x) const {
-            assert(x.size() == A_.cols() && "dimension x must be equal count columns A_!");
+            assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
             return Sigma::evaluate0(A_ * x + b_);
         }
         Matrix count_grad_A(const Vector &x, const Vector &u) const {
-            assert(x.size() == A_.cols() && "dimension x must be equal count columns A_!");
-            assert(u.size() == A_.rows() && "dimension u must be equal count rows A_!");
+            assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
+            assert(u.size() == A_.rows() && "dimension u must be equal to the number of rows of A_!");
             return Sigma::evaluate1(A_ * x + b_) * u * x.transpose();
         }
         Vector count_grad_b(const Vector &x, const Vector &u) const {
-            assert(x.size() == A_.cols() && "dimension x must be equal count columns A_!");
-            assert(u.size() == A_.rows() && "dimension u must be equal count rows A_!");
+            assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
+            assert(u.size() == A_.rows() && "dimension u must be equal to the number of rows of A_!");
             return Sigma::evaluate1(A_ * x + b_) * u;
         }
         Vector count_grad_x(const Vector &x, const Vector &u) const {
-            assert(x.size() == A_.cols() && "dimension x must be equal count columns A_!");
-            assert(u.size() == A_.rows() && "dimension u must be equal count rows A_!");
+            assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
+            assert(u.size() == A_.rows() && "dimension u must be equal to the number of rows of A_!");
             return (u.transpose() * Sigma::evaluate1(A_ * x + b_) * A_).transpose();
         }
 
@@ -112,15 +112,11 @@ namespace ML {
             }
             return result / z.size();
         }
-        static Vector count_starting_gradient(const TrainingData &data, const std::vector<Vector> &z) {
-            assert(!z.empty());
-            Vector gradient = Vector::Zero(z[0].size());
-            for (int i = 0; i < z.size(); ++i) {
-                assert(z[i].size() == data[i].Output.size() && "dimension z[i] must be equal dimension data[i].Output");
-                assert(z[i].size() == z[0].size() && "all vectors must have the same dimension");
-                gradient += z[i] - data[i].Output;
-            }
-            return 2 * gradient / z.size();
+        static Vector count_starting_gradient(const TrainingDatum &data, const Vector &z) {
+            assert(z.size() != 0);
+            assert(z.size() == data.Output.size() && "dimension z must be equal dimension data.Output");
+            Vector gradient = z - data.Output;
+            return 2 * gradient;
         }
     };
 
@@ -136,28 +132,30 @@ namespace ML {
         void train(const TrainingData &data) {
             std::vector<Vector> z1;
             std::vector<Vector> z2;
-            Vector u1;
-            Vector u2;
-            Vector z1_mean = Vector::Zero(z1[0].size());
-            Vector x1_mean = Vector::Zero(data[0].Input.size());
+            std::vector<Vector> u1;
+            std::vector<Vector> u2;
+            Matrix grad_A2;
+            Vector grad_b2;
+            Matrix grad_A1;
+            Vector grad_b1;
             for (int i = 0; i < data.size(); ++i) {
                 z1[i] = NL1.predict(data[i].Input);
-                z2[i] = NL2.predict(data[i].Input);
+                z2[i] = NL2.predict(z1[i]);
+                u2[i] = LF.count_starting_gradient(data[i], z2[i]);
+                grad_A2 += NL2.count_grad_A(z1[i], u2[i]);
+                grad_b2 += NL2.count_grad_b(z1[i], u2[i]);
+                u1[i] = NL1.count_grad_x(z1[i], u2[i]);
+                grad_A1 += NL1.count_grad_A(data[i].Input, u1[i]);
+                grad_b1 += NL1.count_grad_b(data[i].Input, u1[i]);
             }
-            u2 = LF.count_starting_gradient(data, z2);
-            for (int i = 0; i < z1.size(); ++i) {
-                z1_mean += z1[i];
-            }
-            z1_mean /= z1.size();
-            NL2.shift_A(0.1 * NL2.count_grad_A(z1_mean, u2));
-            NL2.shift_b(0.1 * NL2.count_grad_b(z1_mean, u2));
-            u1 = NL1.count_grad_x(z1_mean, u2);
-            for (int i = 0; i < data.size(); ++i) {
-                x1_mean += data[i].Input;
-            }
-            x1_mean /= data.size();
-            NL1.shift_A(0.1 * NL1.count_grad_A(x1_mean, u1));
-            NL1.shift_b(0.1 * NL1.count_grad_b(x1_mean, u1));
+            grad_A2 = grad_A2 / data.size();
+            grad_b2 = grad_b2 / data.size();
+            NL2.shift_A(0.1 * grad_A2);
+            NL2.shift_b(0.1 * grad_b2);
+            grad_A1 = grad_A1 / data.size();
+            grad_b1 = grad_b1 / data.size();
+            NL1.shift_A(0.1 * grad_A1);
+            NL1.shift_b(0.1 * grad_b1);
         };
         Vector predict(const Vector &x) const {
             return NL2.predict(NL1.predict(x));
@@ -225,7 +223,7 @@ void test_loss_function() {
     ML::LossFunction LF;
     std::cout << LF.count_loss_function(data, z) << std::endl;
     std::cout << std::endl;
-    std::cout << LF.count_starting_gradient(data, z) << std::endl;
+    std::cout << LF.count_starting_gradient(data[0], z[0]) << std::endl;
     std::cout << std::endl;
 }
 
