@@ -115,8 +115,8 @@ namespace ML {
         static Vector count_starting_gradient(const TrainingDatum &data, const Vector &z) {
             assert(z.size() != 0);
             assert(z.size() == data.Output.size() && "dimension z must be equal dimension data.Output");
-            Vector gradient = z - data.Output;
-            return 2 * gradient;
+            Vector gradient = 2 * (z - data.Output);
+            return gradient;
         }
     };
 
@@ -134,17 +134,19 @@ namespace ML {
             std::vector<Vector> z2;
             std::vector<Vector> u1;
             std::vector<Vector> u2;
-            Matrix grad_A2;
-            Vector grad_b2;
-            Matrix grad_A1;
-            Vector grad_b1;
             for (int i = 0; i < data.size(); ++i) {
                 z1[i] = NL1.predict(data[i].Input);
                 z2[i] = NL2.predict(z1[i]);
                 u2[i] = LF.count_starting_gradient(data[i], z2[i]);
+                u1[i] = NL1.count_grad_x(z1[i], u2[i]);
+            }
+            Matrix grad_A2 = Matrix::Zero(z2[0].size(), z1[0].size());
+            Vector grad_b2 = Vector::Zero(z1[0].size());
+            Matrix grad_A1 = Matrix::Zero(data[0].Output.size(), data[0].Input.size());
+            Vector grad_b1 = Vector::Zero(data[0].Input.size());
+            for (int i = 0; i < data.size(); ++i) {
                 grad_A2 += NL2.count_grad_A(z1[i], u2[i]);
                 grad_b2 += NL2.count_grad_b(z1[i], u2[i]);
-                u1[i] = NL1.count_grad_x(z1[i], u2[i]);
                 grad_A1 += NL1.count_grad_A(data[i].Input, u1[i]);
                 grad_b1 += NL1.count_grad_b(data[i].Input, u1[i]);
             }
