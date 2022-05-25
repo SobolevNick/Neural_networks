@@ -58,29 +58,38 @@ namespace ML {
             std::cout << b_ << std::endl;
         }
         void shift_A(const Matrix &A) {
+            assert(A.cols() != 0 and A.rows() != 0 && "A mustn't be empty");
             assert(A.cols() == A_.cols() && "dimensions of matrices must be same");
             assert(A.rows() == A_.rows() && "dimensions of matrices must be same");
             A_ = A_ - A;
         }
         void shift_b(const Vector &b) {
+            assert(b.rows() != 0 && "b mustn't be empty");
             assert(b.rows() == b_.rows() && "dimensions of vectors must be same");
             b_ = b_ - b;
         }
         Vector predict(const Vector &x) const {
+            assert(x.rows() != 0 && "x mustn't be empty");
             assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
             return Sigma::evaluate0(A_ * x + b_);
         }
         Matrix count_grad_A(const Vector &x, const Vector &u) const {
+            assert(x.rows() != 0 && "x mustn't be empty");
+            assert(u.rows() != 0 && "u mustn't be empty");
             assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
             assert(u.size() == A_.rows() && "dimension u must be equal to the number of rows of A_!");
             return Sigma::evaluate1(A_ * x + b_) * u * x.transpose();
         }
         Vector count_grad_b(const Vector &x, const Vector &u) const {
+            assert(x.rows() != 0 && "x mustn't be empty");
+            assert(u.rows() != 0 && "u mustn't be empty");
             assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
             assert(u.size() == A_.rows() && "dimension u must be equal to the number of rows of A_!");
             return Sigma::evaluate1(A_ * x + b_) * u;
         }
         Vector count_grad_x(const Vector &x, const Vector &u) const {
+            assert(x.rows() != 0 && "x mustn't be empty");
+            assert(u.rows() != 0 && "u mustn't be empty");
             assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
             assert(u.size() == A_.rows() && "dimension u must be equal to the number of rows of A_!");
             return (u.transpose() * Sigma::evaluate1(A_ * x + b_) * A_).transpose();
@@ -103,7 +112,7 @@ namespace ML {
         };
         using TrainingData = std::vector<TrainingDatum>;
         static float count_loss_function(const TrainingData &data, const std::vector<Vector> &z) {
-            assert(!z.empty());
+            assert(!z.empty() && "z mustn't be empty");
             float result = 0;
             for (int i = 0; i < z.size(); ++i) {
                 assert(z[i].size() == data[i].Output.size() && "dimension z[i] must be equal dimension data[i].Output");
@@ -113,7 +122,7 @@ namespace ML {
             return result / z.size();
         }
         static Vector count_starting_gradient(const TrainingDatum &data, const Vector &z) {
-            assert(z.size() != 0);
+            assert(z.size() != 0 && "z mustn't be empty");
             assert(z.size() == data.Output.size() && "dimension z must be equal dimension data.Output");
             Vector gradient = 2 * (z - data.Output);
             return gradient;
@@ -130,6 +139,7 @@ namespace ML {
             : NL1(dim2, dim1),
               NL2(dim3, dim2) {}
         void train(const TrainingData &data) {
+            assert(data.size() != 0 && "data mustn't be empty");
             std::vector<Vector> z1(data.size());
             std::vector<Vector> z2(data.size());
             std::vector<Vector> u1(data.size());
@@ -140,28 +150,40 @@ namespace ML {
                 u2[i] = LF.count_starting_gradient(data[i], z2[i]);
                 u1[i] = NL2.count_grad_x(z1[i], u2[i]);
             }
-            Matrix grad_A2 = Matrix::Zero(z2[0].size(), z1[0].size());
-            Vector grad_b2 = Vector::Zero(z2[0].size());
-            Matrix grad_A1 = Matrix::Zero(z1[0].size(), data[0].Input.size());
-            Vector grad_b1 = Vector::Zero(z1[0].size());
-            for (int i = 0; i < data.size(); ++i) {
-                grad_A2 += NL2.count_grad_A(z1[i], u2[i]);
-                grad_b2 += NL2.count_grad_b(z1[i], u2[i]);
-                grad_A1 += NL1.count_grad_A(data[i].Input, u1[i]);
-                grad_b1 += NL1.count_grad_b(data[i].Input, u1[i]);
+            int n = 1;
+            while (ML::LossFunction::count_loss_function(data, z2) > 0.005) {
+                for (int i = 0; i < data.size(); ++i) {
+                    z1[i] = NL1.predict(data[i].Input);
+                    z2[i] = NL2.predict(z1[i]);
+                    u2[i] = LF.count_starting_gradient(data[i], z2[i]);
+                    u1[i] = NL2.count_grad_x(z1[i], u2[i]);
+                }
+                Matrix grad_A2 = Matrix::Zero(z2[0].size(), z1[0].size());
+                Vector grad_b2 = Vector::Zero(z2[0].size());
+                Matrix grad_A1 = Matrix::Zero(z1[0].size(), data[0].Input.size());
+                Vector grad_b1 = Vector::Zero(z1[0].size());
+                for (int i = 0; i < data.size(); ++i) {
+                    grad_A2 += NL2.count_grad_A(z1[i], u2[i]);
+                    grad_b2 += NL2.count_grad_b(z1[i], u2[i]);
+                    grad_A1 += NL1.count_grad_A(data[i].Input, u1[i]);
+                    grad_b1 += NL1.count_grad_b(data[i].Input, u1[i]);
+                }
+                grad_A2 = grad_A2 / data.size();
+                grad_b2 = grad_b2 / data.size();
+                NL2.shift_A(grad_A2 / n);
+                NL2.shift_b(grad_b2 / n);
+                grad_A1 = grad_A1 / data.size();
+                grad_b1 = grad_b1 / data.size();
+                NL1.shift_A(grad_A1 / n);
+                NL1.shift_b(grad_b1 / n);
+                n += 0.5;
             }
-            grad_A2 = grad_A2 / data.size();
-            grad_b2 = grad_b2 / data.size();
-            NL2.shift_A(grad_A2);
-            NL2.shift_b( grad_b2);
-            grad_A1 = grad_A1 / data.size();
-            grad_b1 = grad_b1 / data.size();
-            NL1.shift_A(grad_A1);
-            NL1.shift_b(grad_b1);
         }
         Vector predict(const Vector &x) const {
+            assert(x.rows() != 0 && "x mustn't be empty");
             return NL2.predict(NL1.predict(x));
         }
+
     private:
         NetLayer NL1;
         NetLayer NL2;
@@ -200,24 +222,24 @@ void test_loss_function() {
     using TrainingDatum = ML::LossFunction::TrainingDatum;
     using TrainingData = std::vector<TrainingDatum>;
     TrainingData data(2);
-    Vector x0(5);
-    x0 << -2, 3.5, 5, -4, 0;
-    Vector y0(4);
-    y0 << 0.1, 0.2, 1, 0.7;
-    Vector x1(5);
-    x1 << 1, 15, 75, 64, 5;
-    Vector y1(4);
-    y1 << 0.1, 0.2, 1, 0.7;
+    Vector x0(4);
+    x0 << -2, 3.5, 5, -4;
+    Vector y0(3);
+    y0 << 0.7, 0.2, 1;
+    Vector x1(4);
+    x1 << 1, 0.4, 3, 2;
+    Vector y1(3);
+    y1 << 0.16, 0.98, 0.11;
+    data.resize(2);
     data[0].Input = x0;
     data[0].Output = y0;
     data[1].Input = x1;
     data[1].Output = y1;
-    std::vector<Vector> z;
-    z.resize(2);
-    Vector z0(4);
-    Vector z1(4);
-    z0 << 6.5, -7, 13, -22;
-    z1 << 7, 9, 0, -15;
+    std::vector<Vector> z(2);
+    Vector z0(3);
+    Vector z1(3);
+    z0 << 0.65, 0.13, 0.22;
+    z1 << 0.7, 0.9, 0.15;
     z[0] = z0;
     z[1] = z1;
     ML::LossFunction LF;
@@ -231,31 +253,23 @@ void test_neural_network() {
     using Vector = ML::Sigma::Vector;
     using TrainingDatum = ML::LossFunction::TrainingDatum;
     using TrainingData = std::vector<TrainingDatum>;
-    ML::NeuralNetwork NN(4,5,3);
+    ML::NeuralNetwork NN(4, 5, 3);
     TrainingData data;
     Vector x0(4);
-    x0 << -2, 3.5, 5, -4;
+    x0 << 2, 0.35, 5, -4;
     Vector y0(3);
-    y0 << 0.7, 0.2, 1;
+    y0 << 0.1175, 0.2675, 0.5;
     Vector x1(4);
-    x1 << -10, 0, 7.8, 3.7;
+    x1 << 0.89, 0.4, 3, 2;
     Vector y1(3);
-    y1 << 0.1, 0.98, 0.11;
+    y1 << 0.0645, 0.17, 0.25;
     data.resize(2);
     data[0].Input = x0;
     data[0].Output = y0;
     data[1].Input = x1;
     data[1].Output = y1;
-    std::vector<Vector> z;
-    z.resize(2);
-    Vector z0(4);
-    Vector z1(4);
-    z0 << 6.5, -7, 13, -22;
-    z1 << 7, 9, 0, -15;
-    z[0] = z0;
-    z[1] = z1;
     Vector x(4);
-    x << -2, 3.5, 5, -4;
+    x << 2, 0.35, 5, -4;
     std::cout << NN.predict(x) << std::endl;
     std::cout << std::endl;
     NN.train(data);
