@@ -1,5 +1,6 @@
 #include <Eigen/Dense>
 #include <EigenRand/EigenRand>
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <vector>
@@ -9,18 +10,45 @@ namespace ML {
     public:
         using Matrix = Eigen::MatrixXf;
         using Vector = Eigen::VectorXf;
-        static float evaluate0(float x) {
+        static double evaluate0(double x) {
             return 1 / (1 + exp(-x));
         }
-        static float evaluate1(float x) {
+        static double evaluate1(double x) {
             return exp(x) / pow((1 + exp(x)), 2);
         };
         static Vector evaluate0(const Vector &x) {
-            return x.array().exp() / (1 + x.array().exp());
+            return 1. / (1. + exp(-x.array()));
         };
         static Matrix evaluate1(const Vector &x) {
-            return (x.array().exp() / pow(1 + x.array().exp(), 2)).matrix().asDiagonal();
+            return (exp(-x.array()) / pow(1. + exp(-x.array()), 2)).matrix().asDiagonal();
         };
+    };
+    class Relu {
+    public:
+        using Matrix = Eigen::MatrixXf;
+        using Vector = Eigen::VectorXf;
+        static double evaluate0(double x) {
+            return (0 < x) ? x : 0.;
+        }
+        static double evaluate1(double x) {
+            return (0 < x) ? 1 : 0.;
+        }
+        static Vector evaluate0(const Vector &x) {
+            Vector y(x.size());
+            for (int i = 0; i < x.size(); ++i) {
+                y[i] = (x[i] > 0) ? x[i] : 0;
+            }
+            return y;
+        }
+        static Matrix evaluate1(const Vector &x) {
+            Matrix A(x.size(), x.size());
+            Vector y(x.size());
+            for (int i = 0; i < y.size(); ++i) {
+                y[i] = (x[i] > 0) ? 1 : 0;
+            }
+            A = y.matrix().asDiagonal();
+            return A;
+        }
     };
 
     class Random {
@@ -71,28 +99,28 @@ namespace ML {
         Vector predict(const Vector &x) const {
             assert(x.rows() != 0 && "x mustn't be empty");
             assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
-            return Sigma::evaluate0(A_ * x + b_);
+            return Relu::evaluate0(A_ * x + b_);
         }
         Matrix count_grad_A(const Vector &x, const Vector &u) const {
             assert(x.rows() != 0 && "x mustn't be empty");
             assert(u.rows() != 0 && "u mustn't be empty");
             assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
             assert(u.size() == A_.rows() && "dimension u must be equal to the number of rows of A_!");
-            return Sigma::evaluate1(A_ * x + b_) * u * x.transpose();
+            return Relu::evaluate1(A_ * x + b_) * u * x.transpose();
         }
         Vector count_grad_b(const Vector &x, const Vector &u) const {
             assert(x.rows() != 0 && "x mustn't be empty");
             assert(u.rows() != 0 && "u mustn't be empty");
             assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
             assert(u.size() == A_.rows() && "dimension u must be equal to the number of rows of A_!");
-            return Sigma::evaluate1(A_ * x + b_) * u;
+            return Relu::evaluate1(A_ * x + b_) * u;
         }
         Vector count_grad_x(const Vector &x, const Vector &u) const {
             assert(x.rows() != 0 && "x mustn't be empty");
             assert(u.rows() != 0 && "u mustn't be empty");
             assert(x.size() == A_.cols() && "dimension x must be equal to the number of columns of A_!");
             assert(u.size() == A_.rows() && "dimension u must be equal to the number of rows of A_!");
-            return (u.transpose() * Sigma::evaluate1(A_ * x + b_) * A_).transpose();
+            return (u.transpose() * Relu::evaluate1(A_ * x + b_) * A_).transpose();
         }
 
     private:
@@ -151,7 +179,12 @@ namespace ML {
                 u1[i] = NL2.count_grad_x(z1[i], u2[i]);
             }
             int n = 1;
-            while (ML::LossFunction::count_loss_function(data, z2) > 0.005) {
+            int j = 0;
+            std::vector<Matrix> v_A2(1);
+            std::vector<Matrix> v_A1(1);
+            std::vector<Vector> v_b2(1);
+            std::vector<Vector> v_b1(1);
+            while (ML::LossFunction::count_loss_function(data, z2) > 0.01) {
                 for (int i = 0; i < data.size(); ++i) {
                     z1[i] = NL1.predict(data[i].Input);
                     z2[i] = NL2.predict(z1[i]);
@@ -170,13 +203,28 @@ namespace ML {
                 }
                 grad_A2 = grad_A2 / data.size();
                 grad_b2 = grad_b2 / data.size();
-                NL2.shift_A(grad_A2 / n);
-                NL2.shift_b(grad_b2 / n);
                 grad_A1 = grad_A1 / data.size();
                 grad_b1 = grad_b1 / data.size();
-                NL1.shift_A(grad_A1 / n);
-                NL1.shift_b(grad_b1 / n);
-                n += 0.5;
+                v_A2[0] = grad_A2;
+                v_b2[0] = grad_b2;
+                v_A1[0] = grad_A1;
+                v_b1[0] = grad_b1;
+                v_A2.resize(j + 1);
+                v_b2.resize(j + 1);
+                v_A1.resize(j + 1);
+                v_b1.resize(j + 1);
+                if (j != 0) {
+                    v_A2[j] = 0.9 * v_A2[j - 1] + grad_A2 / n;
+                    v_b2[j] = 0.9 * v_b2[j - 1] + grad_b2 / n;
+                    v_A1[j] = 0.9 * v_A1[j - 1] + grad_A1 / n;
+                    v_b1[j] = 0.9 * v_b1[j - 1] + grad_b1 / n;
+                }
+                NL2.shift_A(v_A2[j]);
+                NL2.shift_b(v_b2[j]);
+                NL1.shift_A(v_A1[j]);
+                NL1.shift_b(v_b1[j]);
+                n += 1;
+                j += 1;
             }
         }
         Vector predict(const Vector &x) const {
@@ -258,18 +306,30 @@ void test_neural_network() {
     Vector x0(4);
     x0 << 2, 0.35, 5, -4;
     Vector y0(3);
-    y0 << 0.1175, 0.2675, 0.5;
+    y0 << 0.1175, 0.2675, 0.05;
     Vector x1(4);
     x1 << 0.89, 0.4, 3, 2;
     Vector y1(3);
     y1 << 0.0645, 0.17, 0.25;
-    data.resize(2);
+    Vector x2(4);
+    x2 << 2, 0.7, 1.5, 0.3;
+    Vector y2(3);
+    y2 << 0.135, 0.11, 0.09;
+    Vector x3(4);
+    x3 << 0.7, 2.3, 1.1, 0.6;
+    Vector y3(3);
+    y3 << 0.15, 0.17, 0.085;
+    data.resize(4);
     data[0].Input = x0;
     data[0].Output = y0;
     data[1].Input = x1;
     data[1].Output = y1;
+    data[2].Input = x2;
+    data[2].Output = y2;
+    data[3].Input = x3;
+    data[3].Output = y3;
     Vector x(4);
-    x << 2, 0.35, 5, -4;
+    x << 0.89, 0.4, 3, 2;
     std::cout << NN.predict(x) << std::endl;
     std::cout << std::endl;
     NN.train(data);
@@ -288,3 +348,4 @@ int main() {
     test_all();
     return 0;
 }
+
